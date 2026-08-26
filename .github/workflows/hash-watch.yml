@@ -1,18 +1,19 @@
 name: hash-watch
 
-# UBI-182: this repo's own real drift check. Unlike ubx-sdk-kubernetes's
-# own hash-watch.yml (which hashes the fetched spec directly and compares
-# raw content), this repo delegates the "did anything real change"
-# question to ubx-provider-dynamic's own --generate-snapshot itself: it
-# re-fetches Kubernetes' live OpenAPI/Swagger description
-# (release-1.37 branch, not a tag -- a real, live branch whose content can
-# drift between runs), regenerates a snapshot, and diffs the result's own
-# mechanically-derived version (internal/snapshot's DiffLevel/NextVersion)
-# against the version already committed in snapshot.json. A real content
-# change that doesn't affect the translated schema (whitespace, key
-# ordering, an untranslated field) produces NoChange -- exactly the same
-# version, nothing to do -- so this never opens a hollow PR the way a raw
-# byte-hash comparison would.
+# UBI-182: this repo's own real drift check, rewritten for the
+# group-container format (v2.0.0). Kubernetes' own real published
+# identity is a GROUP of two members (kubernetes: resource mode;
+# kubernetes_ds: data-source mode), both fetched from the identical live
+# release-1.37 OpenAPI/Swagger description but built through genuinely
+# different pipelines -- ubx-provider-dynamic's own --generate-snapshot-group
+# regenerates BOTH real members in one real invocation and assembles
+# them into one real, versioned group container (internal/snapshot's own
+# AssembleGroup: the highest real change level across every member,
+# never hand-picked). --prev-snapshot points at THIS checkout's own root
+# (already the real manifest.json + members/ shape a real group needs),
+# so a content change that doesn't affect either member's own translated
+# schema produces NoChange and no PR, the identical real discipline the
+# single-member version of this workflow already had.
 #
 # Never auto-merges, matching every other repo in this org.
 
@@ -51,36 +52,61 @@ jobs:
             -o "${{ runner.temp }}/ubx-provider-dynamic" \
             ./cmd/ubx-provider-dynamic
 
-      - name: Regenerate a fresh snapshot and diff its own mechanically-derived version against the committed one
+      - name: Read the committed group version before regenerating
+        id: before
+        run: |
+          set -euo pipefail
+          current="$(python3 -c "import json; print(json.load(open('manifest.json'))['version'])")"
+          echo "current=$current" >> "$GITHUB_OUTPUT"
+          echo "Committed manifest.json is at version $current"
+
+      - name: Regenerate both real members and assemble the group
         id: gen
         run: |
           set -euo pipefail
-          current="$(python3 -c "import json; print(json.load(open('snapshot.json'))['version'])")"
-          echo "current=$current" >> "$GITHUB_OUTPUT"
-          echo "Committed snapshot.json is at version $current"
-
           mkdir -p "${{ runner.temp }}/gen/.ubx"
           cat > "${{ runner.temp }}/gen/.ubx/config" <<'EOF'
           [dynamic_providers.kubernetes]
           schema_source = "openapi"
           schema_url = "https://raw.githubusercontent.com/kubernetes/kubernetes/release-1.37/api/openapi-spec/swagger.json"
           base_url = "https://kubernetes.example.invalid"
+
+          [dynamic_providers.kubernetes_ds]
+          schema_source = "openapi"
+          schema_url = "https://raw.githubusercontent.com/kubernetes/kubernetes/release-1.37/api/openapi-spec/swagger.json"
+          base_url = "https://kubernetes.example.invalid"
+          wire_name = "kubernetes"
+          data_sources = true
           EOF
 
+          rm -rf "${{ runner.temp }}/new-group"
           ( cd "${{ runner.temp }}/gen" && \
-            UBX_DYNAMIC_PROVIDER_NAME=kubernetes "${{ runner.temp }}/ubx-provider-dynamic" \
-              --generate-snapshot="${{ runner.temp }}/new-snapshot.json" \
-              --prev-snapshot="$GITHUB_WORKSPACE/snapshot.json" )
+            "${{ runner.temp }}/ubx-provider-dynamic" \
+              --generate-snapshot-group="${{ runner.temp }}/new-group" \
+              --group-repo-name=kubernetes \
+              --group-members=kubernetes,kubernetes_ds \
+              --prev-snapshot="$GITHUB_WORKSPACE" )
 
-          new="$(python3 -c "import json; print(json.load(open('${{ runner.temp }}/new-snapshot.json'))['version'])")"
+          new="$(python3 -c "import json; print(json.load(open('${{ runner.temp }}/new-group/manifest.json'))['version'])")"
           echo "new=$new" >> "$GITHUB_OUTPUT"
-          if [ "$new" = "$current" ]; then
+          if [ "$new" = "${{ steps.before.outputs.current }}" ]; then
             echo "newer=false" >> "$GITHUB_OUTPUT"
-            echo "Already current at $current -- nothing to do."
+            echo "Already current at ${{ steps.before.outputs.current }} -- nothing to do."
           else
             echo "newer=true" >> "$GITHUB_OUTPUT"
-            echo "Real version change: $current -> $new"
+            echo "Real version change: ${{ steps.before.outputs.current }} -> $new"
           fi
+
+      - name: Report which real members changed
+        if: steps.gen.outputs.newer == 'true'
+        run: |
+          set -euo pipefail
+          for f in "${{ runner.temp }}"/new-group/members/*.json; do
+            name="$(basename "$f" .json)"
+            if ! diff -q "$f" "members/$name.json" > /dev/null 2>&1; then
+              echo "changed member: $name"
+            fi
+          done
 
       - name: Open PR
         if: steps.gen.outputs.newer == 'true'
@@ -88,20 +114,21 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          cp "${{ runner.temp }}/new-snapshot.json" snapshot.json
+          cp "${{ runner.temp }}/new-group/manifest.json" manifest.json
+          cp "${{ runner.temp }}"/new-group/members/*.json members/
           git config user.name "ubx-bot"
           git config user.email "actions@users.noreply.github.com"
           branch="snapshot-regen/kubernetes-${{ steps.gen.outputs.new }}"
           git checkout -b "$branch"
-          git add snapshot.json
-          git commit -m "snapshot: regenerate from Kubernetes OpenAPI spec, ${{ steps.gen.outputs.current }} -> ${{ steps.gen.outputs.new }}"
+          git add manifest.json members/
+          git commit -m "snapshot: regenerate from Kubernetes OpenAPI spec, ${{ steps.before.outputs.current }} -> ${{ steps.gen.outputs.new }}"
           git push origin "$branch" --force
           gh pr create \
-            --title "snapshot: regenerate from Kubernetes OpenAPI spec (${{ steps.gen.outputs.current }} -> ${{ steps.gen.outputs.new }})" \
-            --body "Automated regeneration (\`.github/workflows/hash-watch.yml\`), triggered by re-running ubx-provider-dynamic's own \`--generate-snapshot\` against Kubernetes' live \`release-1.37\` branch OpenAPI/Swagger description and diffing mechanically against the previously committed \`snapshot.json\`.
+            --title "snapshot: regenerate from Kubernetes OpenAPI spec (${{ steps.before.outputs.current }} -> ${{ steps.gen.outputs.new }})" \
+            --body "Automated regeneration (\`.github/workflows/hash-watch.yml\`), triggered by re-running ubx-provider-dynamic's own \`--generate-snapshot-group\` against Kubernetes' live \`release-1.37\` branch OpenAPI/Swagger description (both real members: \`kubernetes\` resource mode, \`kubernetes_ds\` data-source mode) and diffing mechanically against the previously committed group.
 
-          Previous version: \`${{ steps.gen.outputs.current }}\`
+          Previous version: \`${{ steps.before.outputs.current }}\`
           New version: \`${{ steps.gen.outputs.new }}\`
 
-          Never auto-merges -- review the diff before merging. After merge, dispatch \`publish.yml\` to cut the real GitHub Release." \
+          Only the real, changed members/*.json files are touched -- unaffected members stay byte-identical. Never auto-merges -- review the diff before merging. After merge, dispatch \`publish.yml\` to cut the real GitHub Release." \
             --base main --head "$branch"

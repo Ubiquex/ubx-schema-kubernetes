@@ -3,18 +3,25 @@ name: publish
 # Manual-trigger only (matching every ubx-sdk-* repo's own publish.yml
 # convention): after a hash-watch regen PR merges, someone clicks "Run
 # workflow" to cut the real GitHub Release provider.AcquireSchema
-# (ubiquex's own provider/acquireschema.go) expects -- tag v<version>,
-# exactly two assets, snapshot.json and SHA256SUMS (the identical real
-# "<hex digest>  <filename>" sha256sum format AcquireSchema's own
-# expectedSHA256 parser already reads for the OpenTofu registry path,
-# reused verbatim -- confirmed against that function directly, not
-# assumed). No npm/PyPI/Go proxy involved: this repo is not a language
-# SDK, it distributes one real, frozen artifact via GitHub Releases only.
+# (ubiquex's own provider/acquireschema.go) expects.
+#
+# UBI-182 group-container change: the COMMITTED files stay separate,
+# per-member (manifest.json + members/<name>.json) -- that's what makes
+# a version bump's own real git diff show which members actually
+# changed, the whole point of committing at all. The RELEASE packs them
+# into ONE compressed archive (snapshot.tar.gz) purely so a real pinned
+# resolution stays one real download regardless of member count -- a
+# real, measured problem this format replaces: one flat file at AWS's
+# real 430-member scale would exceed GitHub's own real 100MB commit
+# limit by more than 2x (this repo's own PR history has the real
+# numbers). Exactly two release assets: snapshot.tar.gz and SHA256SUMS
+# (the checksum covers the ARCHIVE, not each member file separately).
 #
 # The version published is always whatever's already committed in
-# snapshot.json -- this workflow never bumps a version itself (unlike the
-# ubx-sdk-* repos' own publish.yml), since hash-watch.yml already derives
-# and commits the real, mechanical version bump before this ever runs.
+# manifest.json -- this workflow never bumps a version itself, matching
+# the prior single-member version of this workflow: hash-watch.yml
+# already derives and commits the real, mechanical version bump before
+# this ever runs.
 
 on:
   workflow_dispatch: {}
@@ -31,13 +38,13 @@ jobs:
         with:
           ref: main
 
-      - name: Read the version to publish from the committed snapshot
+      - name: Read the version to publish from the committed manifest
         id: version
         run: |
           set -euo pipefail
-          v="$(python3 -c "import json; print(json.load(open('snapshot.json'))['version'])")"
+          v="$(python3 -c "import json; print(json.load(open('manifest.json'))['version'])")"
           echo "version=$v" >> "$GITHUB_OUTPUT"
-          echo "Publishing snapshot.json's own committed version: $v"
+          echo "Publishing manifest.json's own committed version: $v"
 
       - name: Refuse to republish an existing release
         env:
@@ -46,12 +53,15 @@ jobs:
           set -euo pipefail
           v="${{ steps.version.outputs.version }}"
           if gh release view "v$v" >/dev/null 2>&1; then
-            echo "v$v is already released -- nothing to do (a real hash-watch regen bumps snapshot.json's own version before this can run again)" >&2
+            echo "v$v is already released -- nothing to do (a real hash-watch regen bumps manifest.json's own version before this can run again)" >&2
             exit 1
           fi
 
-      - name: Compute SHA256SUMS
-        run: sha256sum snapshot.json > SHA256SUMS
+      - name: Pack the committed group into one real archive
+        run: |
+          set -euo pipefail
+          tar czf snapshot.tar.gz manifest.json members/
+          sha256sum snapshot.tar.gz > SHA256SUMS
 
       - name: Create the GitHub Release
         env:
@@ -59,15 +69,20 @@ jobs:
         run: |
           set -euo pipefail
           v="${{ steps.version.outputs.version }}"
-          fmt="$(python3 -c "import json; print(json.load(open('snapshot.json'))['schema_format'])")"
-          gh release create "v$v" snapshot.json SHA256SUMS \
+          fmt="$(python3 -c "import json; print(json.load(open('manifest.json'))['schema_format'])")"
+          members="$(python3 -c "import json; print(', '.join(json.load(open('manifest.json'))['members']))")"
+          gh release create "v$v" snapshot.tar.gz SHA256SUMS \
             --title "v$v" \
-            --notes "Kubernetes provider schema snapshot v$v (schema_format $fmt, source: openapi).
+            --notes "Kubernetes provider schema snapshot v$v (schema_format $fmt, real members: $members).
 
-          Pin via \`[providers.kubernetes]\` in ubiquex:
+          Pin each real member you need in ubiquex -- both point at the same repo/version, one real download covers both:
 
           \`\`\`toml
           [providers.kubernetes]
+          source  = \"ubiquex/kubernetes\"
+          version = \"$v\"
+
+          [providers.kubernetes_ds]
           source  = \"ubiquex/kubernetes\"
           version = \"$v\"
           \`\`\`"
@@ -79,7 +94,7 @@ jobs:
           set -euo pipefail
           v="${{ steps.version.outputs.version }}"
           gh release view "v$v" --json assets --jq '.assets[].name' | sort > "${{ runner.temp }}/got-assets"
-          printf '%s\n' "SHA256SUMS" "snapshot.json" | sort > "${{ runner.temp }}/want-assets"
+          printf '%s\n' "SHA256SUMS" "snapshot.tar.gz" | sort > "${{ runner.temp }}/want-assets"
           if ! diff -u "${{ runner.temp }}/want-assets" "${{ runner.temp }}/got-assets"; then
             echo "release v$v does not have exactly the two expected assets" >&2
             exit 1
