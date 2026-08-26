@@ -1,0 +1,87 @@
+name: publish
+
+# Manual-trigger only (matching every ubx-sdk-* repo's own publish.yml
+# convention): after a hash-watch regen PR merges, someone clicks "Run
+# workflow" to cut the real GitHub Release provider.AcquireSchema
+# (ubiquex's own provider/acquireschema.go) expects -- tag v<version>,
+# exactly two assets, snapshot.json and SHA256SUMS (the identical real
+# "<hex digest>  <filename>" sha256sum format AcquireSchema's own
+# expectedSHA256 parser already reads for the OpenTofu registry path,
+# reused verbatim -- confirmed against that function directly, not
+# assumed). No npm/PyPI/Go proxy involved: this repo is not a language
+# SDK, it distributes one real, frozen artifact via GitHub Releases only.
+#
+# The version published is always whatever's already committed in
+# snapshot.json -- this workflow never bumps a version itself (unlike the
+# ubx-sdk-* repos' own publish.yml), since hash-watch.yml already derives
+# and commits the real, mechanical version bump before this ever runs.
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out ubx-schema-kubernetes
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Read the version to publish from the committed snapshot
+        id: version
+        run: |
+          set -euo pipefail
+          v="$(python3 -c "import json; print(json.load(open('snapshot.json'))['version'])")"
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "Publishing snapshot.json's own committed version: $v"
+
+      - name: Refuse to republish an existing release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          v="${{ steps.version.outputs.version }}"
+          if gh release view "v$v" >/dev/null 2>&1; then
+            echo "v$v is already released -- nothing to do (a real hash-watch regen bumps snapshot.json's own version before this can run again)" >&2
+            exit 1
+          fi
+
+      - name: Compute SHA256SUMS
+        run: sha256sum snapshot.json > SHA256SUMS
+
+      - name: Create the GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          v="${{ steps.version.outputs.version }}"
+          fmt="$(python3 -c "import json; print(json.load(open('snapshot.json'))['schema_format'])")"
+          gh release create "v$v" snapshot.json SHA256SUMS \
+            --title "v$v" \
+            --notes "Kubernetes provider schema snapshot v$v (schema_format $fmt, source: openapi).
+
+          Pin via \`[providers.kubernetes]\` in ubiquex:
+
+          \`\`\`toml
+          [providers.kubernetes]
+          source  = \"ubiquex/kubernetes\"
+          version = \"$v\"
+          \`\`\`"
+
+      - name: Verify the release is real and carries exactly the two expected assets, queried independently
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          v="${{ steps.version.outputs.version }}"
+          gh release view "v$v" --json assets --jq '.assets[].name' | sort > "${{ runner.temp }}/got-assets"
+          printf '%s\n' "SHA256SUMS" "snapshot.json" | sort > "${{ runner.temp }}/want-assets"
+          if ! diff -u "${{ runner.temp }}/want-assets" "${{ runner.temp }}/got-assets"; then
+            echo "release v$v does not have exactly the two expected assets" >&2
+            exit 1
+          fi
+          echo "v$v published with exactly the two expected assets."
