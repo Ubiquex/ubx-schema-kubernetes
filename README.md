@@ -31,13 +31,13 @@ In `ubiquex`, pin a stack's `[providers.kubernetes]` entry:
 ```toml
 [providers.kubernetes]
 source  = "ubiquex/kubernetes"
-version = "0.1.0"
+version = "1.0.0"
 ```
 
 `provider.AcquireSchema` resolves that to
-`github.com/ubiquex/ubx-schema-kubernetes`'s own release tagged `v0.1.0`,
+`github.com/ubiquex/ubx-schema-kubernetes`'s own release tagged `v1.0.0`,
 downloads `snapshot.json`, verifies it against `SHA256SUMS`, and caches it
-at `~/.ubx/schemas/ubiquex/kubernetes/0.1.0/` -- every subsequent
+at `~/.ubx/schemas/ubiquex/kubernetes/1.0.0/` -- every subsequent
 resolution reads the verified local cache, no network involved.
 
 ## Versioning
