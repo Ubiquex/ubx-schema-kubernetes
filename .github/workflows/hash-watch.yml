@@ -1,0 +1,107 @@
+name: hash-watch
+
+# UBI-182: this repo's own real drift check. Unlike ubx-sdk-kubernetes's
+# own hash-watch.yml (which hashes the fetched spec directly and compares
+# raw content), this repo delegates the "did anything real change"
+# question to ubx-provider-dynamic's own --generate-snapshot itself: it
+# re-fetches Kubernetes' live OpenAPI/Swagger description
+# (release-1.37 branch, not a tag -- a real, live branch whose content can
+# drift between runs), regenerates a snapshot, and diffs the result's own
+# mechanically-derived version (internal/snapshot's DiffLevel/NextVersion)
+# against the version already committed in snapshot.json. A real content
+# change that doesn't affect the translated schema (whitespace, key
+# ordering, an untranslated field) produces NoChange -- exactly the same
+# version, nothing to do -- so this never opens a hollow PR the way a raw
+# byte-hash comparison would.
+#
+# Never auto-merges, matching every other repo in this org.
+
+on:
+  schedule:
+    - cron: "0 6 * * 1" # every Monday, 06:00 UTC
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  check-and-regenerate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out ubx-schema-kubernetes
+        uses: actions/checkout@v4
+
+      - name: Check out ubx-provider-dynamic (to build it from source)
+        run: |
+          set -euo pipefail
+          git clone --depth=1 \
+            "https://github.com/Ubiquex/ubx-provider-dynamic.git" \
+            "${{ runner.temp }}/ubx-provider-dynamic-src"
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: ${{ runner.temp }}/ubx-provider-dynamic-src/go.mod
+
+      - name: Build ubx-provider-dynamic
+        run: |
+          set -euo pipefail
+          go build -C "${{ runner.temp }}/ubx-provider-dynamic-src" \
+            -o "${{ runner.temp }}/ubx-provider-dynamic" \
+            ./cmd/ubx-provider-dynamic
+
+      - name: Regenerate a fresh snapshot and diff its own mechanically-derived version against the committed one
+        id: gen
+        run: |
+          set -euo pipefail
+          current="$(python3 -c "import json; print(json.load(open('snapshot.json'))['version'])")"
+          echo "current=$current" >> "$GITHUB_OUTPUT"
+          echo "Committed snapshot.json is at version $current"
+
+          mkdir -p "${{ runner.temp }}/gen/.ubx"
+          cat > "${{ runner.temp }}/gen/.ubx/config" <<'EOF'
+          [dynamic_providers.kubernetes]
+          schema_source = "openapi"
+          schema_url = "https://raw.githubusercontent.com/kubernetes/kubernetes/release-1.37/api/openapi-spec/swagger.json"
+          base_url = "https://kubernetes.example.invalid"
+          EOF
+
+          ( cd "${{ runner.temp }}/gen" && \
+            UBX_DYNAMIC_PROVIDER_NAME=kubernetes "${{ runner.temp }}/ubx-provider-dynamic" \
+              --generate-snapshot="${{ runner.temp }}/new-snapshot.json" \
+              --prev-snapshot="$GITHUB_WORKSPACE/snapshot.json" )
+
+          new="$(python3 -c "import json; print(json.load(open('${{ runner.temp }}/new-snapshot.json'))['version'])")"
+          echo "new=$new" >> "$GITHUB_OUTPUT"
+          if [ "$new" = "$current" ]; then
+            echo "newer=false" >> "$GITHUB_OUTPUT"
+            echo "Already current at $current -- nothing to do."
+          else
+            echo "newer=true" >> "$GITHUB_OUTPUT"
+            echo "Real version change: $current -> $new"
+          fi
+
+      - name: Open PR
+        if: steps.gen.outputs.newer == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          cp "${{ runner.temp }}/new-snapshot.json" snapshot.json
+          git config user.name "ubx-bot"
+          git config user.email "actions@users.noreply.github.com"
+          branch="snapshot-regen/kubernetes-${{ steps.gen.outputs.new }}"
+          git checkout -b "$branch"
+          git add snapshot.json
+          git commit -m "snapshot: regenerate from Kubernetes OpenAPI spec, ${{ steps.gen.outputs.current }} -> ${{ steps.gen.outputs.new }}"
+          git push origin "$branch" --force
+          gh pr create \
+            --title "snapshot: regenerate from Kubernetes OpenAPI spec (${{ steps.gen.outputs.current }} -> ${{ steps.gen.outputs.new }})" \
+            --body "Automated regeneration (\`.github/workflows/hash-watch.yml\`), triggered by re-running ubx-provider-dynamic's own \`--generate-snapshot\` against Kubernetes' live \`release-1.37\` branch OpenAPI/Swagger description and diffing mechanically against the previously committed \`snapshot.json\`.
+
+          Previous version: \`${{ steps.gen.outputs.current }}\`
+          New version: \`${{ steps.gen.outputs.new }}\`
+
+          Never auto-merges -- review the diff before merging. After merge, dispatch \`publish.yml\` to cut the real GitHub Release." \
+            --base main --head "$branch"
