@@ -1,8 +1,6 @@
 {
-  "schema_format": 2,
-  "provider": "kubernetes",
-  "version": "1.0.0",
   "schema_source": "openapi",
+  "mode": "data_source",
   "auth": {
     "Type": "",
     "Params": null

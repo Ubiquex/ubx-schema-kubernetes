@@ -1,0 +1,9 @@
+{
+  "schema_format": 3,
+  "provider": "kubernetes",
+  "version": "2.0.0",
+  "members": [
+    "kubernetes",
+    "kubernetes_ds"
+  ]
+}
