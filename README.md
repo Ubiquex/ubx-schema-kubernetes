@@ -2,10 +2,11 @@
 
 A real, frozen, versioned Kubernetes provider schema snapshot -- the pinnable
 distribution artifact `ubx-provider-dynamic` and `ubiquex` resolve a
-`[providers.kubernetes]`/`[providers.kubernetes_ds]` entry against, with
-zero network calls at schema resolution time (see
-`provider/acquireschema.go` in `ubiquex`, and `internal/snapshot`'s own
-doc comment in `ubx-provider-dynamic`).
+single `[providers.kubernetes]` entry against, with zero network calls at
+schema resolution time (see `provider/acquireschema.go` in `ubiquex`, and
+`internal/snapshot`'s own doc comment in `ubx-provider-dynamic`). The
+resource/data-source split below is a real, internal discovery-time
+detail -- one pin resolves both.
 
 ## What's here
 
@@ -42,25 +43,23 @@ different pipelines:
 
 ## Consuming a real, published version
 
-In `ubiquex`, pin each real member you need:
+In `ubiquex`, one real pin resolves the whole group -- both real members
+(`kubernetes` resource mode, `kubernetes_ds` data-source mode) are served
+together from the SAME launch, the SAME real download:
 
 ```toml
 [providers.kubernetes]
 source  = "ubiquex/kubernetes"
 version = "2.0.0"
-
-[providers.kubernetes_ds]
-source  = "ubiquex/kubernetes"
-version = "2.0.0"
 ```
 
-Both point at the SAME repo/version -- `provider.AcquireSchema`'s own
-cache-by-source+version already collapses this into ONE real download
-and ONE extracted cache directory
-(`~/.ubx/schemas/ubiquex/kubernetes/2.0.0/`) regardless of how many
-members reference it; each launched process picks its own member back
-out of the shared group by the `UBX_DYNAMIC_PROVIDER_NAME` it already
-receives.
+`provider.AcquireSchema`'s own cache-by-source+version resolves ONE real
+download and ONE extracted cache directory
+(`~/.ubx/schemas/ubiquex/kubernetes/2.0.0/`) -- the launched process
+merges every real member of the group (`internal/snapshot.MergeOpenAPIGroup`)
+into one served schema, `ResourceSchemas` and `DataSourceSchemas`
+together, exactly like a real, hand-written Terraform provider already
+looks from the outside.
 
 ## Versioning
 

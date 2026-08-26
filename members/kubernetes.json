@@ -21,6 +21,7 @@
     "Delete": "",
     "Default": ""
   },
+  "wire_name": "kubernetes",
   "raw_spec": {
     "components": {
       "parameters": {
