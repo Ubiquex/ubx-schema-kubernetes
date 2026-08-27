@@ -60,7 +60,7 @@ jobs:
           echo "current=$current" >> "$GITHUB_OUTPUT"
           echo "Committed manifest.json is at version $current"
 
-      - name: Regenerate both real members and assemble the group
+      - name: Regenerate the real member and assemble the group
         id: gen
         run: |
           set -euo pipefail
@@ -70,21 +70,22 @@ jobs:
           schema_source = "openapi"
           schema_url = "https://raw.githubusercontent.com/kubernetes/kubernetes/release-1.37/api/openapi-spec/swagger.json"
           base_url = "https://kubernetes.example.invalid"
-
-          [dynamic_providers.kubernetes_ds]
-          schema_source = "openapi"
-          schema_url = "https://raw.githubusercontent.com/kubernetes/kubernetes/release-1.37/api/openapi-spec/swagger.json"
-          base_url = "https://kubernetes.example.invalid"
-          wire_name = "kubernetes"
-          data_sources = true
           EOF
 
+          # UBI-182's own real collapse: one entry's own single fetch now
+          # produces both real members (kubernetes resource mode,
+          # kubernetes_ds data-source mode) -- the old, separate
+          # [dynamic_providers.kubernetes_ds] table is gone, matching the
+          # SAME collapse ubiquex's own sdk/providers/.ubx/config already
+          # went through for every provider's own resource/data-source
+          # pair (config.Provider.DataSources' own doc comment,
+          # ubx-provider-dynamic).
           rm -rf "${{ runner.temp }}/new-group"
           ( cd "${{ runner.temp }}/gen" && \
             "${{ runner.temp }}/ubx-provider-dynamic" \
               --generate-snapshot-group="${{ runner.temp }}/new-group" \
               --group-repo-name=kubernetes \
-              --group-members=kubernetes,kubernetes_ds \
+              --group-members=kubernetes \
               --prev-snapshot="$GITHUB_WORKSPACE" )
 
           new="$(python3 -c "import json; print(json.load(open('${{ runner.temp }}/new-group/manifest.json'))['version'])")"
