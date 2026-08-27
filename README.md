@@ -50,12 +50,12 @@ together from the SAME launch, the SAME real download:
 ```toml
 [providers.kubernetes]
 source  = "ubiquex/kubernetes"
-version = "2.0.0"
+version = "3.0.0"
 ```
 
 `provider.AcquireSchema`'s own cache-by-source+version resolves ONE real
 download and ONE extracted cache directory
-(`~/.ubx/schemas/ubiquex/kubernetes/2.0.0/`) -- the launched process
+(`~/.ubx/schemas/ubiquex/kubernetes/3.0.0/`) -- the launched process
 merges every real member of the group (`internal/snapshot.MergeOpenAPIGroup`)
 into one served schema, `ResourceSchemas` and `DataSourceSchemas`
 together, exactly like a real, hand-written Terraform provider already
@@ -77,3 +77,17 @@ single-member, flat-file format, superseded rather than kept
 compatible) -- the group-container shape (multiple members, explicit
 resource/data-source mode) is a genuinely different, incompatible
 snapshot format, not a routine content update.
+
+`v3.0.0` (`kubernetes` resource content unchanged, `kubernetes_ds` a
+real, breaking content correction) is UBI-182's own resource/
+data-source collapse, landing here twice over: (1) `hash-watch.yml`'s
+own driving config collapses from two `[dynamic_providers.*]` tables to
+one (`config.Provider.DataSources`' own doc comment, ubx-provider-dynamic),
+matching the identical collapse ubiquex's own `sdk/providers/.ubx/config`
+went through for every provider. (2) A real, live bug surfaced while
+regenerating under that collapse: the wire_name fix that corrected
+`kubernetes_ds`'s own type-name prefixes (`kubernetes_ds_*` -> the
+intended, shared `kubernetes_*`) had been merged into this repo's own
+`main` branch but never actually republished -- `v2.0.0`'s real release
+asset kept serving the old, wrong prefixes the whole time. `v3.0.0` is
+the first real release to carry the fix.
