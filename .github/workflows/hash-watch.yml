@@ -33,10 +33,25 @@ jobs:
       - name: Check out ubx-schema-kubernetes
         uses: actions/checkout@v4
 
-      - name: Check out ubx-provider-dynamic (to build it from source)
+      - name: Check out ubx-provider-dynamic's own latest real published release (to build it from source)
+        id: dynver
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          git clone --depth=1 \
+          # UBI-194: this must be a real, tagged release, never main HEAD --
+          # a snapshot's own min_binary_version is stamped from this same
+          # build (see the "Build ubx-provider-dynamic" step's -ldflags
+          # below), so building an untagged HEAD would stamp every
+          # regenerated snapshot with the meaningless default "dev" instead
+          # of a real, acquirable version. Using the latest real GitHub
+          # Release (not main HEAD) means MinBinaryVersion always names a
+          # binary a real ubx install can actually acquire via
+          # provider.AcquireDynamicProviderBinary.
+          ver="$(gh api repos/Ubiquex/ubx-provider-dynamic/releases/latest --jq '.tag_name' | sed 's/^v//')"
+          echo "version=$ver" >> "$GITHUB_OUTPUT"
+          echo "Building against ubx-provider-dynamic's real, latest published release: v$ver"
+          git clone --depth=1 --branch "v$ver" \
             "https://github.com/Ubiquex/ubx-provider-dynamic.git" \
             "${{ runner.temp }}/ubx-provider-dynamic-src"
 
@@ -49,8 +64,14 @@ jobs:
         run: |
           set -euo pipefail
           go build -C "${{ runner.temp }}/ubx-provider-dynamic-src" \
+            -ldflags "-X github.com/ubiquex/ubx-provider-dynamic/internal/snapshot.BinaryVersion=${{ steps.dynver.outputs.version }}" \
             -o "${{ runner.temp }}/ubx-provider-dynamic" \
             ./cmd/ubx-provider-dynamic
+          got="$("${{ runner.temp }}/ubx-provider-dynamic" --version)"
+          if [ "$got" != "${{ steps.dynver.outputs.version }}" ]; then
+            echo "built binary reports version '$got', expected '${{ steps.dynver.outputs.version }}'" >&2
+            exit 1
+          fi
 
       - name: Read the committed group version before regenerating
         id: before
