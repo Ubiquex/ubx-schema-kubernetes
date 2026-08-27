@@ -22,6 +22,15 @@ name: publish
 # the prior single-member version of this workflow: hash-watch.yml
 # already derives and commits the real, mechanical version bump before
 # this ever runs.
+#
+# Real, live finding, fixed here: this workflow used to bake manifest.
+# json's own internal member NAMES ("kubernetes, kubernetes_ds")
+# straight into the release's own notes, inviting a reader to pin one
+# of them directly -- exactly the two-pin shape the resource/
+# data-source collapse (UBI-182) exists to make unnecessary. Release
+# notes now carry real, mechanically-computed COUNTS instead
+# (--dump-group-summary, built from the SAME merge every pinned
+# resolution already goes through), never a member name.
 
 on:
   workflow_dispatch: {}
@@ -37,6 +46,25 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: main
+
+      - name: Check out ubx-provider-dynamic (to build it from source)
+        run: |
+          set -euo pipefail
+          git clone --depth=1 \
+            "https://github.com/Ubiquex/ubx-provider-dynamic.git" \
+            "${{ runner.temp }}/ubx-provider-dynamic-src"
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: ${{ runner.temp }}/ubx-provider-dynamic-src/go.mod
+
+      - name: Build ubx-provider-dynamic
+        run: |
+          set -euo pipefail
+          go build -C "${{ runner.temp }}/ubx-provider-dynamic-src" \
+            -o "${{ runner.temp }}/ubx-provider-dynamic" \
+            ./cmd/ubx-provider-dynamic
 
       - name: Read the version to publish from the committed manifest
         id: version
@@ -63,6 +91,17 @@ jobs:
           tar czf snapshot.tar.gz manifest.json members/
           sha256sum snapshot.tar.gz > SHA256SUMS
 
+      - name: Summarize the real, committed group -- counts only, never a member name
+        id: summary
+        run: |
+          set -euo pipefail
+          "${{ runner.temp }}/ubx-provider-dynamic" --dump-group-summary="$PWD" > "${{ runner.temp }}/summary.json"
+          cat "${{ runner.temp }}/summary.json"
+          r="$(python3 -c "import json; print(json.load(open('${{ runner.temp }}/summary.json'))['resources'])")"
+          d="$(python3 -c "import json; print(json.load(open('${{ runner.temp }}/summary.json'))['data_sources'])")"
+          echo "resources=$r" >> "$GITHUB_OUTPUT"
+          echo "data_sources=$d" >> "$GITHUB_OUTPUT"
+
       - name: Create the GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -70,19 +109,14 @@ jobs:
           set -euo pipefail
           v="${{ steps.version.outputs.version }}"
           fmt="$(python3 -c "import json; print(json.load(open('manifest.json'))['schema_format'])")"
-          members="$(python3 -c "import json; print(', '.join(json.load(open('manifest.json'))['members']))")"
           gh release create "v$v" snapshot.tar.gz SHA256SUMS \
             --title "v$v" \
-            --notes "Kubernetes provider schema snapshot v$v (schema_format $fmt, real members: $members).
+            --notes "Kubernetes provider schema snapshot v$v (schema_format $fmt, ${{ steps.summary.outputs.resources }} real resource types, ${{ steps.summary.outputs.data_sources }} real data source types).
 
-          Pin each real member you need in ubiquex -- both point at the same repo/version, one real download covers both:
+          One real pin covers the whole group -- the resource/data-source split is an internal discovery-time detail, never something a user writes a second config block for:
 
           \`\`\`toml
           [providers.kubernetes]
-          source  = \"ubiquex/kubernetes\"
-          version = \"$v\"
-
-          [providers.kubernetes_ds]
           source  = \"ubiquex/kubernetes\"
           version = \"$v\"
           \`\`\`"
