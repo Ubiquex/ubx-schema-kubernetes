@@ -1,9 +1,10 @@
 {
   "schema_format": 3,
   "provider": "kubernetes",
-  "version": "3.0.0",
+  "version": "3.0.1",
   "members": [
     "kubernetes",
     "kubernetes_ds"
-  ]
+  ],
+  "min_binary_version": "1.0.1"
 }
