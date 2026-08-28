@@ -48,3 +48,13 @@ pin resolves both.
   `AssembleGroup` also forces at least a Patch bump when only
   `min_binary_version` changed and no member's own content did (confirmed
   live: `v3.0.0 -> v3.0.1` carried zero real API drift).
+
+## Architecture documentation
+
+This repo's own snapshot content is generated, never architectural on
+its own. A change to HOW it's generated — the pinning/versioning
+mechanism, `hash-watch.yml`/`publish.yml`'s own real logic, anything
+about `min_binary_version` or the diff/version-derivation rules — is
+architectural, and gets `ubiquex-internals`' own Provider System page
+(the developer documentation site) updated in the same body of work,
+never a follow-up. Matches `ubiquex` CLAUDE.md rule 10.
