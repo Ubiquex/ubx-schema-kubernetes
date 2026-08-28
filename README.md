@@ -91,3 +91,13 @@ intended, shared `kubernetes_*`) had been merged into this repo's own
 `main` branch but never actually republished -- `v2.0.0`'s real release
 asset kept serving the old, wrong prefixes the whole time. `v3.0.0` is
 the first real release to carry the fix.
+
+<!-- README-GEN:BEGIN -->
+**Real, current published version:** `v3.0.1`
+
+## Links
+
+- Docs: https://docs.ubiquex.io
+- Internals (architecture and design): https://github.com/Ubiquex/ubiquex-internals
+- Linear board: https://linear.app/ubiquex
+<!-- README-GEN:END -->
