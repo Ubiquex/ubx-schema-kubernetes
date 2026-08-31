@@ -1,10 +1,14 @@
 {
   "schema_format": 3,
   "provider": "kubernetes",
-  "version": "3.0.1",
+  "version": "3.0.2",
   "members": [
     "kubernetes",
     "kubernetes_ds"
   ],
-  "min_binary_version": "1.0.1"
+  "min_binary_version": "1.0.6",
+  "schema_urls": {
+    "kubernetes": "https://raw.githubusercontent.com/kubernetes/kubernetes/release-1.37/api/openapi-spec/swagger.json",
+    "kubernetes_ds": "https://raw.githubusercontent.com/kubernetes/kubernetes/release-1.37/api/openapi-spec/swagger.json"
+  }
 }

@@ -135302,5 +135302,6 @@
         "BearerToken": []
       }
     ]
-  }
+  },
+  "schema_url": "https://raw.githubusercontent.com/kubernetes/kubernetes/release-1.37/api/openapi-spec/swagger.json"
 }
