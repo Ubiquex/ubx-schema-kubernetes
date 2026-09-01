@@ -1,0 +1,55 @@
+name: ci
+
+# manifest.json + members/ is a real, hand-maintained group container
+# (UBI-182), not code -- there is no meaningful "go build" here. The
+# real, meaningful check is the same one this repo's own publish.yml
+# already runs at release time (--dump-group-summary), just run on
+# every push and pull request instead of only when someone manually
+# publishes: it loads the real, committed snapshot through
+# ubx-provider-dynamic's own real parsing path (the same one
+# provider.AcquireSchema uses in production), and fails loudly if
+# manifest.json references a member with no backing file, a member
+# file is not valid JSON, or the group otherwise fails to load.
+# Confirmed live against both failure modes before wiring this in
+# anywhere: a manifest entry with no backing file, and an
+# invalid-JSON manifest, both fail with a real, specific error and a
+# non-zero exit, not a check that always passes.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Check out ubx-provider-dynamic (to build it from source)
+        run: |
+          set -euo pipefail
+          git clone --depth=1 \
+            "https://github.com/Ubiquex/ubx-provider-dynamic.git" \
+            "${{ runner.temp }}/ubx-provider-dynamic-src"
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: ${{ runner.temp }}/ubx-provider-dynamic-src/go.mod
+
+      - name: Build ubx-provider-dynamic
+        run: |
+          set -euo pipefail
+          go build -C "${{ runner.temp }}/ubx-provider-dynamic-src" \
+            -o "${{ runner.temp }}/ubx-provider-dynamic" \
+            ./cmd/ubx-provider-dynamic
+
+      - name: Validate the committed group snapshot loads cleanly
+        run: |
+          set -euo pipefail
+          "${{ runner.temp }}/ubx-provider-dynamic" --dump-group-summary="$PWD"
