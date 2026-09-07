@@ -20,7 +20,12 @@ name: hash-watch
 on:
   schedule:
     - cron: "0 6 * * 1" # every Monday, 06:00 UTC
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      force_binary_version_bump:
+        description: "Bump even if no member content changed, for a ubx-provider-dynamic release that changes WHAT the binary derives (UBI-241). Off by default so an ordinary tag does not manufacture a release across every provider (UBI-249)."
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -104,6 +109,7 @@ jobs:
           rm -rf "${{ runner.temp }}/new-group"
           ( cd "${{ runner.temp }}/gen" && \
             "${{ runner.temp }}/ubx-provider-dynamic" \
+              ${{ inputs.force_binary_version_bump && '--force-binary-version-bump' || '' }} \
               --generate-snapshot-group="${{ runner.temp }}/new-group" \
               --group-repo-name=kubernetes \
               --group-members=kubernetes \

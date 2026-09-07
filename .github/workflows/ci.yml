@@ -53,3 +53,14 @@ jobs:
         run: |
           set -euo pipefail
           "${{ runner.temp }}/ubx-provider-dynamic" --dump-group-summary="$PWD"
+
+      - name: Snapshot pins a current ubx-provider-dynamic
+        # A snapshot decides which binary every `ubx sdk gen` runs, so a
+        # stale stamp silently pins pre-fix behaviour forever. UBI-241:
+        # six snapshot PRs were cut hours before a behaviour-changing
+        # release and nothing rechecked them. Warns on main, fails on a
+        # PR, since a snapshot being proposed now should be cut against
+        # what is current.
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 scripts/check_snapshot_stamp.py
