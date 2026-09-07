@@ -16,23 +16,48 @@ published releases claiming a fix that had not shipped.
 The failure mode is a merge that looks completely normal. This turns it
 into a visible one.
 
-DELIBERATELY A WARNING ON main, A FAILURE ON A PULL REQUEST. A committed
-snapshot legitimately lags the newest binary most of the time, and
-failing main for that would be noise. A snapshot being *proposed* right
-now is a different thing: it should be cut against what is current, and
-if it is not, re-cutting costs one dispatch.
+DELIBERATELY A FAILURE ONLY ON A PR THAT PROPOSES A SNAPSHOT. A
+committed snapshot legitimately lags the newest binary most of the
+time, so failing every build for that would be noise, and failing an
+unrelated PR would be worse: this check's own introducing PR failed
+that way, which is how the targeting got fixed before it shipped.
+
+What it should catch is a snapshot being *proposed* right now against a
+binary that is already superseded, which is exactly the case that went
+wrong. So: fail when the PR touches manifest.json, warn otherwise.
 """
 
 from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
 import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 LATEST = "https://api.github.com/repos/Ubiquex/ubx-provider-dynamic/releases/latest"
+
+
+def proposes_a_snapshot() -> bool:
+    """Does this PR actually change the snapshot, or merely sit next to one?
+
+    A base ref is only set on a pull_request event. If the diff cannot be
+    read for any reason, this returns False: a check that cannot tell
+    what changed should warn rather than block.
+    """
+    base = os.environ.get("GITHUB_BASE_REF")
+    if not base:
+        return False
+    try:
+        subprocess.run(["git", "fetch", "--depth=1", "origin", base], cwd=ROOT, check=True,
+                       capture_output=True)
+        out = subprocess.run(["git", "diff", "--name-only", f"origin/{base}...HEAD"], cwd=ROOT,
+                             check=True, capture_output=True, text=True).stdout
+    except Exception:  # noqa: BLE001
+        return False
+    return any(line.strip() == "manifest.json" for line in out.splitlines())
 
 
 def parse(v: str) -> tuple[int, ...]:
@@ -61,7 +86,7 @@ def main() -> int:
         print(f"ok: snapshot pins ubx-provider-dynamic {stamped}, latest is {latest}")
         return 0
 
-    on_pr = os.environ.get("GITHUB_EVENT_NAME") == "pull_request"
+    on_pr = os.environ.get("GITHUB_EVENT_NAME") == "pull_request" and proposes_a_snapshot()
     where = "This snapshot" if on_pr else "The committed snapshot"
     print(
         f"{where} pins ubx-provider-dynamic {stamped}, but {latest} is released.\n"
