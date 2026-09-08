@@ -144,11 +144,25 @@ jobs:
           set -euo pipefail
           cp "${{ runner.temp }}/new-group/manifest.json" manifest.json
           cp "${{ runner.temp }}"/new-group/members/*.json members/
+          # identity.json is the split format's third file: resource type ->
+          # the attributes that identify one instance. Copied and added
+          # explicitly, because this step names its paths rather than
+          # syncing the directory, so a new file is invisible to it by
+          # default. That is not hypothetical: the first AWS regeneration
+          # after the generator started emitting identity produced a
+          # snapshot without it and nothing failed, because a missing
+          # identity map is legal and means "this snapshot cannot say".
+          # Guarded on existence, so this is inert until this provider's
+          # own generator emits one.
+          if [ -f "${{ runner.temp }}/new-group/identity.json" ]; then
+            cp "${{ runner.temp }}/new-group/identity.json" identity.json
+          fi
           git config user.name "ubx-bot"
           git config user.email "actions@users.noreply.github.com"
           branch="snapshot-regen/kubernetes-${{ steps.gen.outputs.new }}"
           git checkout -b "$branch"
           git add manifest.json members/
+          [ -f identity.json ] && git add identity.json
           git commit -m "snapshot: regenerate from Kubernetes OpenAPI spec, ${{ steps.before.outputs.current }} -> ${{ steps.gen.outputs.new }}"
           git push origin "$branch" --force
           gh pr create \

@@ -88,7 +88,11 @@ jobs:
       - name: Pack the committed group into one real archive
         run: |
           set -euo pipefail
-          tar czf snapshot.tar.gz manifest.json members/
+          # identity.json rides along when present. Without it the
+          # published archive would omit the file even though the repo
+          # committed it, so ubx would read an identity-less snapshot and
+          # silently fall back to deriving a lookup key the old way.
+          tar czf snapshot.tar.gz manifest.json members/ $([ -f identity.json ] && echo identity.json)
           sha256sum snapshot.tar.gz > SHA256SUMS
 
       - name: Summarize the real, committed group -- counts only, never a member name
